@@ -139,31 +139,9 @@ function drawFront(ctx, state, zoom) {
       ctx.fillRect(profileW, y, cabinetW - 2 * profileW, d.gapTop)
     }
 
-    // Side rails — shown as end-face rectangles on left/right of drawer opening
-    if (railType === 'side') {
-      let railCY
-      if (isAluminum) {
-        railCY = calcRailBeamCenterY(state, i)
-      } else {
-        railCY = y + d.gapTop + d.h / 2
-      }
-      const rY = railCY - railH / 2
-      const lRailX = profileW + d.gapLeft
-      const rRailX = lRailX + innerW + railGap
-
-      ctx.fillStyle = C.railFill
-      ctx.strokeStyle = C.railStroke
-      ctx.lineWidth = 0.8 / zoom
-      // Left rail end face
-      ctx.fillRect(lRailX - railThick - railGap, rY, railThick, railH)
-      ctx.strokeRect(lRailX - railThick - railGap, rY, railThick, railH)
-      // Right rail end face
-      ctx.fillRect(rRailX, rY, railThick, railH)
-      ctx.strokeRect(rRailX, rY, railThick, railH)
-    }
-
     if (isAluminum) {
-      const frameX = profileW + d.gapLeft
+      const railOffset = railType === 'side' ? railThick + railGap : 0
+      const frameX = profileW + d.gapLeft + railOffset
       const frameY = y + d.gapTop
       // Left post
       profileRect(ctx, frameX, frameY, dpW, d.h - dpH, '', zoom)
@@ -191,6 +169,30 @@ function drawFront(ctx, state, zoom) {
     const hx = fpX + fp.w / 2 - hW / 2, hy = fpY + fp.h / 2 - hH / 2
     ctx.roundRect(hx, hy, hW, hH, 1.5 / zoom)
     ctx.fill()
+
+    // Side rails — drawn after face panel so they remain visible
+    // Layout: column | gapLeft | rail(railThick) | railGap | drawer(innerW) | railGap | rail | gapRight | column
+    if (railType === 'side') {
+      let railCY
+      if (isAluminum) {
+        railCY = calcRailBeamCenterY(state, i)
+      } else {
+        railCY = y + d.gapTop + d.h / 2
+      }
+      const rY = railCY - railH / 2
+      const leftRailX = profileW + d.gapLeft
+      const rightRailX = leftRailX + railThick + railGap + innerW + railGap
+
+      ctx.fillStyle = C.railFill
+      ctx.strokeStyle = C.railStroke
+      ctx.lineWidth = 1 / zoom
+      // Left rail end face
+      ctx.fillRect(leftRailX, rY, railThick, railH)
+      ctx.strokeRect(leftRailX, rY, railThick, railH)
+      // Right rail end face
+      ctx.fillRect(rightRailX, rY, railThick, railH)
+      ctx.strokeRect(rightRailX, rY, railThick, railH)
+    }
 
     // Dim: face panel height on right
     dim(ctx, cabinetW + 8 / zoom, fpY, cabinetW + 8 / zoom, fpY + fp.h, `${fp.h}`, zoom)
