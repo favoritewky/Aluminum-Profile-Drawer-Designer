@@ -108,23 +108,32 @@ export function generateBOM(state) {
     const isAluminum = (d.drawerType ?? 'aluminum') === 'aluminum'
 
     if (isAluminum) {
-      // Aluminum profile frame drawer (open top, connected with 三通角件 at 4 bottom corners)
-      // Front/back horizontal beams
-      add('profile', '抽屉横梁（前/后）',
-        `${dpW}×${dpH}×${Math.round(innerW)}mm`, 2, '根', lbl, `drawer-${i}`)
-      // Side horizontal beams (depth direction) — only bottom pair, no top
-      add('profile', '抽屉横梁（侧向）',
-        `${dpW}×${dpH}×${Math.round(innerD - 2 * dpW)}mm`, 2, '根', lbl, `drawer-${i}`)
-      // Vertical posts: height = drawer height minus one beam at bottom (top is open)
+      const isTee = cornerType === 'tee'
+
+      if (isTee) {
+        // 三通角码: each connector joins front/back beam + side beam + vertical post
+        // All three beams are shortened by dpW at each end so they butt into the connector
+        add('profile', '抽屉横梁（前/后）',
+          `${dpW}×${dpH}×${Math.round(innerW - 2 * dpW)}mm`, 2, '根', lbl, `drawer-${i}`)
+        add('profile', '抽屉横梁（侧向）',
+          `${dpW}×${dpH}×${Math.round(innerD - 2 * dpW)}mm`, 2, '根', lbl, `drawer-${i}`)
+      } else {
+        // L角码 / 槽用角码 / T螺母: front/back beams span full width; side beams fit between them
+        add('profile', '抽屉横梁（前/后）',
+          `${dpW}×${dpH}×${Math.round(innerW)}mm`, 2, '根', lbl, `drawer-${i}`)
+        add('profile', '抽屉横梁（侧向）',
+          `${dpW}×${dpH}×${Math.round(innerD - 2 * dpW)}mm`, 2, '根', lbl, `drawer-${i}`)
+      }
+      // Vertical posts at 4 corners (all connector types)
       add('profile', '抽屉立柱',
         `${dpW}×${dpH}×${Math.round(d.h - dpH)}mm`, 4, '根', lbl, `drawer-${i}`)
 
-      // Connectors: 4 bottom corners (三通角件), each needs 3 screws
+      // Connectors: 4 bottom corners, each needs 3 screws
       add('connector', cornerLabel, '', 4, '个', `${lbl} 底部四角`, `drawer-${i}`)
       add('screw', `内六角螺钉 ${screwType}`, screwType, 12, '颗', lbl, `drawer-${i}`)
 
       if (capType !== 'none') {
-        // Caps only on the 4 top open ends of the vertical posts
+        // Caps on the 4 open post tops
         add('connector', capLabel, `${dpW}×${dpH}mm`, 4, '个', `${lbl} 立柱顶端`, `drawer-${i}`)
       }
       if (cornerType === 'tnut') {
@@ -137,6 +146,16 @@ export function generateBOM(state) {
       add('panel', '抽屉底板',
         `${bpW}×${bpD}mm 厚${d.bottomThick}mm`,
         1, '块', `${lbl} | ${matLabel}`, `drawer-${i}`)
+
+      // Back and side panels (三面箱体板, excluding front face which is the 面板)
+      const spH = Math.round(d.h - dpH)
+      const sideThick = d.boxSideThick ?? 3
+      add('panel', '抽屉后板',
+        `${bpW}×${spH}mm 厚${sideThick}mm`,
+        1, '块', `${lbl} | ${matLabel}`, `drawer-${i}`)
+      add('panel', '抽屉侧板',
+        `${bpD}×${spH}mm 厚${sideThick}mm`,
+        2, '块', `${lbl} | ${matLabel}`, `drawer-${i}`)
     } else {
       // Wood drawer box: 2 side panels + front + back panel
       const sideThick = d.facePanelThick

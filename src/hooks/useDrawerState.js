@@ -10,6 +10,7 @@ function defaultDrawer(h = 120) {
     gapLeft: 2,
     gapRight: 2,
     bottomThick: 6,
+    boxSideThick: 3,          // thickness for aluminum drawer back/side panels
     facePanelThick: 18,
     drawerType: 'aluminum', // 'aluminum' | 'wood'
     expand: { top: 'none', bottom: 'none', left: 'none', right: 'none' },
@@ -56,6 +57,7 @@ const INITIAL = {
   capType: 'plastic',
 
   // UI
+  cabinetDimMode: 'outer',  // 'outer' | 'inner'
   currentDrawer: 0,
   view: 'front',
 

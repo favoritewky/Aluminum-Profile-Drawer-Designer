@@ -46,10 +46,10 @@ export default function DrawerSection({ state, set, setDrawerField, setCurrentDr
       </Row2>
       <Row2>
         <Field label="左侧间隙 (mm)">
-          <NumInput value={d.gapLeft ?? 2} onChange={v => setDrawerField('gapLeft', v)} min={0} max={50} step={0.5} />
+          <NumInput value={d.gapLeft ?? 0} onChange={v => setDrawerField('gapLeft', v)} min={0} max={50} step={0.5} />
         </Field>
         <Field label="右侧间隙 (mm)">
-          <NumInput value={d.gapRight ?? 2} onChange={v => setDrawerField('gapRight', v)} min={0} max={50} step={0.5} />
+          <NumInput value={d.gapRight ?? 0} onChange={v => setDrawerField('gapRight', v)} min={0} max={50} step={0.5} />
         </Field>
       </Row2>
       <Row2>
@@ -60,6 +60,13 @@ export default function DrawerSection({ state, set, setDrawerField, setCurrentDr
           <NumInput value={d.facePanelThick ?? 18} onChange={v => setDrawerField('facePanelThick', v)} min={3} max={50} />
         </Field>
       </Row2>
+      {isAluminum && (
+        <Row2>
+          <Field label="箱体侧板厚度 (mm)">
+            <NumInput value={d.boxSideThick ?? 3} onChange={v => setDrawerField('boxSideThick', v)} min={1} max={20} step={0.5} />
+          </Field>
+        </Row2>
+      )}
     </div>
   )
 }
