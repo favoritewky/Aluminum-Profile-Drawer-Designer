@@ -6,10 +6,10 @@ export const EXPAND_CYCLE = ['none', 'half', 'full']
 function defaultDrawer(h = 120) {
   return {
     h,
-    gapTop: 5,
-    gapLeft: 2,
-    gapRight: 2,
-    bottomThick: 6,
+    gapTop: 10,
+    gapLeft: 0,
+    gapRight: 0,
+    bottomThick: 18,
     boxSideThick: 3,          // thickness for aluminum drawer back/side panels
     facePanelThick: 18,
     drawerType: 'aluminum', // 'aluminum' | 'wood'
