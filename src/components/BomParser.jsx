@@ -489,7 +489,7 @@ export default function BomParser() {
                     {rows.length > 0 ? (
                       <table className="text-xs w-full border-collapse">
                         <thead>
-                          <tr className="sticky top-0 bg-slate-100 z-10">
+                          <tr className="sticky top-0 bg-slate-100 z-[1]">
                             {CSV_HEADERS.map(h => (
                               <th key={h}
                                 className="text-left px-3 py-2 font-semibold text-slate-600
@@ -563,8 +563,6 @@ export default function BomParser() {
                     </div>
                     )
                   })()}
-                  )}
-
                 </div>
               </div>
             </div>

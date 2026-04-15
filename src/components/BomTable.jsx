@@ -136,7 +136,7 @@ export default function BomTable({ state }) {
       {/* Table */}
       <div className="overflow-auto flex-1">
         <table className="w-full text-xs border-collapse">
-          <thead className="sticky top-0 bg-slate-50 z-10">
+          <thead className="sticky top-0 bg-slate-50 z-[1]">
             <tr>
               {['类型', '名称', '规格', '数量', '单位', '备注'].map(h => (
                 <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
