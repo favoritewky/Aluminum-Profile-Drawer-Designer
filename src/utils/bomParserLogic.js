@@ -173,6 +173,42 @@ function parseTextBOM(raw) {
 // 解析 MayCAD JSON 文件 ({ version, entities })
 // 型材长度 — 4×4 矩阵（行主序 flat[16]）三列向量模长的最大值
 // 面板尺寸 — PLN_CONTOUR.vertices 的包围盒（已是设计最终尺寸，无需再调整）
+// 打孔加工 — MACH_TYPE_CROSS_BORE：用户自绘沉头孔；从 matrix[12,13,14] 读取位置和面
+// 攻丝检测 — 沉头孔出口侧若有另一根型材端面对接，该型材标记为需攻丝；偏差 >2mm 触发警告
+
+// 行主序 4×4 矩阵变换：lx/lz 为截面 mm 坐标，ly_norm = by_mm / profile_len（型材 Y 轴已归一化）
+function _xformPt(mat, lx, ly_norm, lz) {
+  return [
+    lx * mat[0] + ly_norm * mat[4] + lz * mat[8]  + mat[12],
+    lx * mat[1] + ly_norm * mat[5] + lz * mat[9]  + mat[13],
+    lx * mat[2] + ly_norm * mat[6] + lz * mat[10] + mat[14],
+  ]
+}
+const _dist3 = (a, b) => Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
+
+// 从 entity.data.machining 提取用户自绘沉头孔（MACH_TYPE_CROSS_BORE）
+// 返回 subs，每项含 {letter, type, detail, fingerprint, bx, by, bz, face}
+function parseJsonMachining(machList) {
+  if (!machList?.length) return []
+  const subs = []
+  let letterCode = 65 // 'A'
+  for (const m of machList) {
+    if (m.mach_type !== 'MACH_TYPE_CROSS_BORE') continue
+    const bx = Math.round(m.matrix?.[12] ?? 0)
+    const by = Math.round(m.matrix?.[13] ?? 0)  // 距左端 mm
+    const bz = Math.round(m.matrix?.[14] ?? 0)
+    // 绝对值较大的截面分量决定所在面
+    const face = Math.abs(bx) >= Math.abs(bz)
+      ? (bx >= 0 ? 'X+面' : 'X-面')
+      : (bz >= 0 ? 'Z+面' : 'Z-面')
+    const distStr     = `距左端${by}mm`
+    const fingerprint = `沉头孔|${face}|${distStr}`
+    subs.push({ letter: String.fromCharCode(letterCode++), type: '沉头孔',
+      bx, by, bz, face, detail: `沉头孔 ${face}，${distStr}`, fingerprint })
+  }
+  return subs
+}
+
 export function parseJsonBOM(data) {
   if (!data?.entities || !Array.isArray(data.entities))
     throw new Error('不是有效的 MayCAD JSON 文件（缺少 entities 数组）')
@@ -186,10 +222,11 @@ export function parseJsonBOM(data) {
     return [Math.round(Math.max(...xs) - Math.min(...xs)), Math.round(Math.max(...ys) - Math.min(...ys))]
   }
 
-  const profMap  = new Map()
-  const ppMap    = new Map()
-  const panelBuf = []
-  const hwMap    = new Map()
+  const profMap    = new Map()
+  const ppMap      = new Map()
+  const panelBuf   = []
+  const hwMap      = new Map()
+  const rawProfiles = []   // 保留原始实体数据，用于攻丝连接检测
 
   for (const e of data.entities) {
     if (e.excludeFromBOM) continue
@@ -198,19 +235,29 @@ export function parseJsonBOM(data) {
     const mat  = e.matrix || []
 
     if (p === '1.11' || p === '1.41') {
-      const len = Math.round(Math.max(colLen(mat, 0), colLen(mat, 4), colLen(mat, 8)))
-      const key = `${code}|${len}`
-      const map = p === '1.11' ? profMap : ppMap
+      const len  = Math.round(Math.max(colLen(mat, 0), colLen(mat, 4), colLen(mat, 8)))
+      const subs = parseJsonMachining(e.data?.machining)
+      // 同 code + 长度 + 加工签名 → 合并数量；签名不同则独立列出（用于差异警告）
+      const sig  = subs.map(s => s.fingerprint).sort().join(';')
+      const key  = `${code}|${len}|${sig}`
+      const map  = p === '1.11' ? profMap : ppMap
       if (map.has(key)) map.get(key).qty++
-      else map.set(key, { code, length: len, qty: 1, drawRef: null, subs: [], warned: false })
+      else map.set(key, { code, length: len, qty: 1, drawRef: null, subs, warned: false })
+      // 记录原始数据供几何分析
+      rawProfiles.push({ code, len, key, mat: mat.slice(),
+        startW: _xformPt(mat, 0, 0, 0), endW: _xformPt(mat, 0, 1, 0), subs })
 
     } else if (p === '2.86' || p === '2.87' || p === '2.83') {
       const verts = e.data?.PLN_CONTOUR?.vertices || []
-      const dims  = verts.length >= 6 ? bboxDims(verts) : null
+      let dims    = verts.length >= 6 ? bboxDims(verts) : null
+      // 插板（2.87）：长和宽各减 10mm（内嵌余量）
+      if (p === '2.87' && dims) dims = [dims[0] - 10, dims[1] - 10]
+      // 侧板（2.83）：宽边 +18mm 与前柜门对齐
+      if (p === '2.83' && dims) dims = [dims[0] + 18, dims[1]]
       const [material, spec, note] =
         p === '2.86' ? ['亚克力',    '6mm', '柜门']
-        : p === '2.87' ? ['聚碳酸酯',  '4mm', '设计为插板，实际做内嵌']
-        :                ['PVC发泡板', '6mm', '侧板（与前柜门对齐）；非库存件按需采购']
+        : p === '2.87' ? ['聚碳酸酯',  '4mm', '设计为插板，实际做内嵌；每边已减10mm']
+        :                ['PVC发泡板', '6mm', '侧板；宽边+18mm与前柜门对齐；非库存件按需采购']
       panelBuf.push({ material, spec, dims, note, drawRef: null })
 
     } else {
@@ -221,6 +268,46 @@ export function parseJsonBOM(data) {
         code.startsWith('1.31.FM4')        ? '螺母板 M4'       :
         code.startsWith('1.31.FM6')        ? '螺母板 M6'       : null
       if (hwName) hwMap.set(hwName, (hwMap.get(hwName) || 0) + 1)
+    }
+  }
+
+  // ── 攻丝连接检测 ──────────────────────────────────────────────────────────────
+  // 对每个沉头孔，计算出口侧世界坐标，查找最近的型材端面。
+  // 偏差 ≤ 2mm：精确对接，标记目标型材需攻丝；> 2mm 且 ≤ 30mm：同样标记但附偏差警告。
+  const TAPPING_EXACT   = 2    // mm，视为精确对接
+  const TAPPING_SEARCH  = 30   // mm，超过此距离认为没有对接型材
+  const connectionWarnings = []
+
+  for (const prof of rawProfiles) {
+    for (const sub of prof.subs) {
+      const { bx, by, bz } = sub
+      // 出口侧局部坐标（对面面）= 对称取反
+      const exitW = _xformPt(prof.mat, -bx, by / prof.len, -bz)
+
+      let bestDist = Infinity, bestProf = null, bestEnd = null
+      for (const other of rawProfiles) {
+        if (other === prof) continue
+        const ds = _dist3(exitW, other.startW)
+        const de = _dist3(exitW, other.endW)
+        if (ds < bestDist) { bestDist = ds; bestProf = other; bestEnd = '左端' }
+        if (de < bestDist) { bestDist = de; bestProf = other; bestEnd = '右端' }
+      }
+
+      if (bestDist <= TAPPING_SEARCH && bestProf) {
+        // 标记目标型材需攻丝
+        const map = profMap.has(bestProf.key) ? profMap : ppMap
+        if (map.has(bestProf.key)) map.get(bestProf.key).tapping = true
+
+        if (bestDist > TAPPING_EXACT) {
+          const warn = `${bestProf.code} ${bestProf.len}mm ${bestEnd} 与沉头孔出口偏差 ${bestDist.toFixed(1)}mm`
+          if (map.has(bestProf.key)) {
+            const e = map.get(bestProf.key)
+            if (!e.tappingWarnings) e.tappingWarnings = []
+            e.tappingWarnings.push(warn)
+          }
+          connectionWarnings.push(warn)
+        }
+      }
     }
   }
 
@@ -239,7 +326,7 @@ export function parseJsonBOM(data) {
   const panels     = numbered([...panelMap.values()])
   const hardware   = [...hwMap.entries()].map(([name, qty]) => ({ num: n++, name, qty }))
 
-  return { profiles, ppProfiles, panels, hardware, others: [], summary: buildSummary(profiles, panels) }
+  return { profiles, ppProfiles, panels, hardware, others: [], summary: buildSummary(profiles, panels), connectionWarnings }
 }
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -248,7 +335,7 @@ export const fmtLen  = mm  => `${fmtN(mm)} mm（${(mm / 1000).toFixed(2)} m）`
 export const fmtArea = mm2 => `${fmtN(mm2)} mm²（${(mm2 / 1e6).toFixed(4)} m²）`
 
 // ─── formatText ───────────────────────────────────────────────────────────────
-export function formatText({ profiles, ppProfiles, panels, hardware, others, summary }) {
+export function formatText({ profiles, ppProfiles, panels, hardware, others, summary, connectionWarnings }) {
   const out = []
   const now = new Date()
   const ts  = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('/')
@@ -261,10 +348,12 @@ export function formatText({ profiles, ppProfiles, panels, hardware, others, sum
 
   let sec = 1
   function pushProfile(p) {
-    const ref  = p.drawRef ? `  （图纸${p.drawRef}）` : ''
-    const warn = p.warned  ? '  ⚠' : ''
-    out.push(`  #${p.num}  ${p.length}mm × ${p.qty}件${ref}${warn}`)
-    for (const s of p.subs) out.push(`       加工 ${s.letter}：${s.type}，${s.detail}`)
+    const ref  = p.drawRef        ? `  （图纸${p.drawRef}）` : ''
+    const warn = p.warned         ? '  ⚠' : ''
+    const tap  = p.tapping        ? '  [需攻丝]' : ''
+    out.push(`  #${p.num}  ${p.length}mm × ${p.qty}件${ref}${tap}${warn}`)
+    for (const s of p.subs) out.push(`       加工 ${s.letter}：${s.detail}`)
+    for (const w of (p.tappingWarnings || [])) out.push(`       ⚠ 对位偏差：${w}`)
   }
 
   if (profiles.length)   { out.push(`【${sec++}、铝型材 30×30mm】`);      profiles.forEach(pushProfile);   out.push('') }
@@ -345,19 +434,32 @@ export function formatText({ profiles, ppProfiles, panels, hardware, others, sum
     out.push('')
   }
 
+  if (connectionWarnings?.length) {
+    out.push('─'.repeat(48))
+    out.push('⚠ 对位偏差警告：以下攻丝对接端面与沉头孔出口不重合，请检查模型！')
+    out.push('')
+    for (const w of connectionWarnings) out.push(`  ${w}`)
+    out.push('')
+  }
+
   return out.join('\n')
 }
 
 // ─── buildRows ────────────────────────────────────────────────────────────────
 export function buildRows({ profiles, ppProfiles, panels, hardware, others }) {
   const rows = []
+  const profNote = p => {
+    const parts = []
+    if (p.subs.length) parts.push(p.subs.map(s => `加工${s.letter}: ${s.detail}`).join(' | '))
+    if (p.tapping)     parts.push('需攻丝')
+    if (p.tappingWarnings?.length) parts.push(p.tappingWarnings.map(w => `⚠${w}`).join(' | '))
+    return parts.join('；')
+  }
   for (const p of profiles) {
-    const machining = p.subs.length ? p.subs.map(s => `加工${s.letter}: ${s.type}，${s.detail}`).join(' | ') : ''
-    rows.push({ num: p.num, category: '铝型材 30×30mm', spec: p.length + 'mm', dims: '', qty: p.qty, drawRef: p.drawRef ? '图纸' + p.drawRef : '', note: machining, warned: p.warned })
+    rows.push({ num: p.num, category: '铝型材 30×30mm', spec: p.length + 'mm', dims: '', qty: p.qty, drawRef: p.drawRef ? '图纸' + p.drawRef : '', note: profNote(p), warned: p.warned })
   }
   for (const p of ppProfiles) {
-    const machining = p.subs.length ? p.subs.map(s => `加工${s.letter}: ${s.type}，${s.detail}`).join(' | ') : ''
-    rows.push({ num: p.num, category: 'PP 组合型材', spec: p.length + 'mm', dims: '', qty: p.qty, drawRef: p.drawRef ? '图纸' + p.drawRef : '', note: machining, warned: p.warned })
+    rows.push({ num: p.num, category: 'PP 组合型材', spec: p.length + 'mm', dims: '', qty: p.qty, drawRef: p.drawRef ? '图纸' + p.drawRef : '', note: profNote(p), warned: p.warned })
   }
   for (const p of panels) {
     rows.push({ num: p.num, category: '面板·' + p.material, spec: p.spec, dims: p.dims ? `${p.dims[0]}×${p.dims[1]}` : '', qty: p.qty, drawRef: p.drawRef ? '图纸' + p.drawRef : '', note: p.note, warned: false })

@@ -59,3 +59,31 @@ Reducer action types: `SET`, `SET_MANY`, `SET_DRAWER_COUNT`, `SET_DRAWER_FIELD`,
 - **New sidebar section:** Create a component in `src/components/Sidebar/`, import it in `Sidebar/index.jsx`, add needed state fields to `INITIAL` in `useDrawerState.js`, and handle them in the reducer.
 - **New canvas view:** Add a draw function in `draw.js`, add the view key to the `view` state, and add a tab in `CanvasView.jsx`.
 - **New BOM category:** Add logic in `generateBOM()` in `bom.js` and update `BomTable.jsx` if needed.
+
+## BOM Parser — Panel Dimension Rules (`src/utils/bomParserLogic.js`)
+
+Both `parseTextBOM` (text path) and `parseJsonBOM` (JSON path) must apply these adjustments after extracting raw dimensions:
+
+| Code prefix | Material | Adjustment |
+|-------------|----------|------------|
+| `2.87` | 聚碳酸酯（插板） | 长和宽各 **−10 mm**（内嵌余量） |
+| `2.83` | PVC 发泡板（侧板） | 宽边 **+18 mm**（与前柜门亚克力齐平） |
+| `2.86` | 亚克力（柜门） | 原样，不调整 |
+
+The JSON path reads vertices from `e.data.PLN_CONTOUR.vertices` and computes a bounding box; the adjustments must be applied to the resulting `dims` array **before** pushing to `panelBuf`.
+
+## BOM Parser — JSON Profile Machining (`src/utils/bomParserLogic.js`)
+
+`parseJsonMachining(machList, profileLen)` converts `entity.data.machining` into a `subs[]` array compatible with the text-path `parseMachining` output.
+
+Only `MACH_TYPE_CROSS_BORE` entries are extracted — these are user-drawn countersunk/counterbore holes on profiles. All other types (`MACH_TYPE_CONN_BORE`, `MACH_TYPE_CUT_SLICE`, `MACH_TYPE_CUT_PNL`, `MACH_TYPE_BORE_PNL`) are ignored.
+
+Fields per `CROSS_BORE` entry:
+- `attributes.main_diameter` → drill diameter (⌀Xmm)
+- `attributes.second_diameter` / `second_depth` → countersink info (沉头⌀Xmm深Ymm), omitted if ≤ 0
+- `matrix[13]` → position along profile axis; compared to `profileLen/2` to report "距左/右端 Xmm"
+- `matrix[12]` / `matrix[14]` → face coordinates, shown as `面(xN,zN)` in fingerprint
+
+Aggregation key for `profMap`/`ppMap` is `${code}|${length}|${machining_sig}` where `machining_sig` is the sorted fingerprints joined by `;`. Profiles with the same code/length but different bore patterns are listed separately and `markWarnings` correctly flags them with ⚠.
+
+
