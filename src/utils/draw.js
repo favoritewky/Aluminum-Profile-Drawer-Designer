@@ -553,13 +553,15 @@ function draw3D(ctx, state, zoom) {
       }
 
       // Drawer slide rails (left and right)
-      const railX1 = pw + d.gapLeft - railThick - railGap
-      const railX2 = pw + d.gapLeft + innerW + railGap
+      // Layout: [pw][gapLeft][railThick][railGap][innerW][railGap][railThick][gapRight][pw]
+      // Rails start at z=pw (inside face of front column) to avoid overlap with front posts
+      const railX1 = pw + d.gapLeft
+      const railX2 = pw + d.gapLeft + railThick + railGap + innerW + railGap
       const railLen3D = Math.min(railLen, innerD)
       // Left rail
-      box3(railX1, rY1, 0, railX1 + railThick, rY2, railLen3D, C.railFill, C.railStroke)
+      box3(railX1, rY1, pw, railX1 + railThick, rY2, pw + railLen3D, C.railFill, C.railStroke)
       // Right rail
-      box3(railX2, rY1, 0, railX2 + railThick, rY2, railLen3D, C.railFill, C.railStroke)
+      box3(railX2, rY1, pw, railX2 + railThick, rY2, pw + railLen3D, C.railFill, C.railStroke)
     }
   }
 
@@ -573,7 +575,9 @@ function draw3D(ctx, state, zoom) {
     const isActive = i === currentDrawer
     const innerW = calcDrawerInnerW(state, i)
     const innerD = calcDrawerInnerD(state)
-    const fx = pw, fw = innerW
+    const railOffset = railType === 'side' ? railThick + railGap : 0
+    const fx = pw + d.gapLeft + railOffset
+    const fw = innerW
     const fd = innerD
 
     if (isAluminum) {
