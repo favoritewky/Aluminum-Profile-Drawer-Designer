@@ -2,6 +2,7 @@ import { useDrawerState } from './hooks/useDrawerState.js'
 import Sidebar from './components/Sidebar/index.jsx'
 import CanvasView from './components/CanvasView.jsx'
 import BomTable from './components/BomTable.jsx'
+import BomParser from './components/BomParser.jsx'
 
 export default function App() {
   const { state, set, setMany, setDrawerCount, setDrawerField, cycleExpand, setCurrentDrawer } = useDrawerState()
@@ -19,11 +20,14 @@ export default function App() {
         </svg>
         <span className="text-base font-semibold tracking-wide">铝型材抽屉设计器</span>
         <span className="text-xs text-slate-400 ml-1">Aluminum Profile Drawer Designer</span>
-        <div className="ml-auto text-[11px] text-slate-500">
-          柜体 {state.cabinetW}×{state.cabinetD}×{state.cabinetH}mm
-          &nbsp;·&nbsp;柜体型材 {state.profileW}×{state.profileH}mm
-          &nbsp;·&nbsp;抽屉型材 {state.drawerProfileW}×{state.drawerProfileH}mm
-          &nbsp;·&nbsp;{state.drawerCount} 个抽屉
+        <div className="ml-auto flex items-center gap-3">
+          <BomParser />
+          <div className="text-[11px] text-slate-500">
+            柜体 {state.cabinetW}×{state.cabinetD}×{state.cabinetH}mm
+            &nbsp;·&nbsp;柜体型材 {state.profileW}×{state.profileH}mm
+            &nbsp;·&nbsp;抽屉型材 {state.drawerProfileW}×{state.drawerProfileH}mm
+            &nbsp;·&nbsp;{state.drawerCount} 个抽屉
+          </div>
         </div>
       </header>
 
