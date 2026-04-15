@@ -294,18 +294,19 @@ export function parseJsonBOM(data) {
       }
 
       if (bestDist <= TAPPING_SEARCH && bestProf) {
-        // 标记目标型材需攻丝
+        // 用 Set 记录需攻丝的端（左端 / 右端），同一根型材被多个孔指向时自动合并
         const map = profMap.has(bestProf.key) ? profMap : ppMap
-        if (map.has(bestProf.key)) map.get(bestProf.key).tapping = true
+        if (map.has(bestProf.key)) {
+          const entry = map.get(bestProf.key)
+          if (!entry.tappingEnds) entry.tappingEnds = new Set()
+          entry.tappingEnds.add(bestEnd)
 
-        if (bestDist > TAPPING_EXACT) {
-          const warn = `${bestProf.code} ${bestProf.len}mm ${bestEnd} 与沉头孔出口偏差 ${bestDist.toFixed(1)}mm`
-          if (map.has(bestProf.key)) {
-            const e = map.get(bestProf.key)
-            if (!e.tappingWarnings) e.tappingWarnings = []
-            e.tappingWarnings.push(warn)
+          if (bestDist > TAPPING_EXACT) {
+            const warn = `${bestProf.code} ${bestProf.len}mm ${bestEnd} 与沉头孔出口偏差 ${bestDist.toFixed(1)}mm`
+            if (!entry.tappingWarnings) entry.tappingWarnings = []
+            entry.tappingWarnings.push(warn)
+            connectionWarnings.push(warn)
           }
-          connectionWarnings.push(warn)
         }
       }
     }
@@ -348,10 +349,12 @@ export function formatText({ profiles, ppProfiles, panels, hardware, others, sum
 
   let sec = 1
   function pushProfile(p) {
-    const ref  = p.drawRef        ? `  （图纸${p.drawRef}）` : ''
-    const warn = p.warned         ? '  ⚠' : ''
-    const tap  = p.tapping        ? '  [需攻丝]' : ''
-    out.push(`  #${p.num}  ${p.length}mm × ${p.qty}件${ref}${tap}${warn}`)
+    const ref    = p.drawRef ? `  （图纸${p.drawRef}）` : ''
+    const warn   = p.warned  ? '  ⚠' : ''
+    const tapStr = p.tappingEnds
+      ? (p.tappingEnds.size >= 2 ? '  [需攻丝（两端）]' : `  [需攻丝（${[...p.tappingEnds][0]}）]`)
+      : ''
+    out.push(`  #${p.num}  ${p.length}mm × ${p.qty}件${ref}${tapStr}${warn}`)
     for (const s of p.subs) out.push(`       加工 ${s.letter}：${s.detail}`)
     for (const w of (p.tappingWarnings || [])) out.push(`       ⚠ 对位偏差：${w}`)
   }
@@ -451,7 +454,10 @@ export function buildRows({ profiles, ppProfiles, panels, hardware, others }) {
   const profNote = p => {
     const parts = []
     if (p.subs.length) parts.push(p.subs.map(s => `加工${s.letter}: ${s.detail}`).join(' | '))
-    if (p.tapping)     parts.push('需攻丝')
+    if (p.tappingEnds) {
+      const endStr = p.tappingEnds.size >= 2 ? '两端' : [...p.tappingEnds][0]
+      parts.push(`需攻丝（${endStr}）`)
+    }
     if (p.tappingWarnings?.length) parts.push(p.tappingWarnings.map(w => `⚠${w}`).join(' | '))
     return parts.join('；')
   }
