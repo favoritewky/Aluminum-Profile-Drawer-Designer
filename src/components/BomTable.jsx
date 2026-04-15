@@ -1,23 +1,40 @@
 import { useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { generateBOM, BOM_TYPE_META, BOM_TYPE_ORDER } from '../utils/bom.js'
 
 export default function BomTable({ state }) {
   const bom = useMemo(() => generateBOM(state), [state])
-  const [scopeFilter, setScopeFilter] = useState('all')
+  const [selectedScopes, setSelectedScopes] = useState(new Set())
 
-  // Build scope tab list: all | cabinet | drawer-0 … drawer-N
+  // Build scope chip list: cabinet | drawer-0 … drawer-N  (no 'all' — empty set = all)
   const scopeTabs = useMemo(() => {
-    const tabs = [{ key: 'all', label: '全部' }, { key: 'cabinet', label: '柜体' }]
+    const tabs = [{ key: 'cabinet', label: '柜体' }]
     for (let i = 0; i < state.drawerCount; i++) {
       tabs.push({ key: `drawer-${i}`, label: `抽屉 ${i + 1}` })
     }
     return tabs
   }, [state.drawerCount])
 
+  function toggleScope(key) {
+    if (key === 'all') { setSelectedScopes(new Set()); return }
+    setSelectedScopes(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
   const filtered = useMemo(
-    () => scopeFilter === 'all' ? bom : bom.filter(x => x.scope === scopeFilter),
-    [bom, scopeFilter]
+    () => selectedScopes.size === 0 ? bom : bom.filter(x => selectedScopes.has(x.scope)),
+    [bom, selectedScopes]
   )
+
+  const exportSuffix = useMemo(() => {
+    if (selectedScopes.size === 0) return '全部'
+    return [...selectedScopes]
+      .map(k => k === 'cabinet' ? '柜体' : `抽屉${parseInt(k.split('-')[1]) + 1}`)
+      .join('+')
+  }, [selectedScopes])
 
   const grouped = useMemo(() =>
     BOM_TYPE_ORDER.reduce((acc, type) => {
@@ -28,17 +45,17 @@ export default function BomTable({ state }) {
     [filtered]
   )
 
-  function exportCSV() {
+  function exportXlsx() {
     const headers = ['类型', '名称', '规格', '数量', '单位', '备注']
     const rows = filtered.map(item => [
       (BOM_TYPE_META[item.type]?.label ?? item.type),
       item.name, item.spec, item.qty, item.unit, item.note,
     ])
-    const csv = [headers, ...rows]
-      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
-      .join('\n')
-    const suffix = scopeFilter === 'all' ? '全部' : scopeFilter === 'cabinet' ? '柜体' : `抽屉${parseInt(scopeFilter.split('-')[1]) + 1}`
-    download('\ufeff' + csv, `铝型材抽屉BOM_${suffix}.csv`, 'text/csv;charset=utf-8')
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+    ws['!cols'] = [{ wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 8 }, { wch: 6 }, { wch: 30 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'BOM')
+    XLSX.writeFile(wb, `铝型材抽屉BOM_${exportSuffix}.xlsx`)
   }
 
   function exportText() {
@@ -46,10 +63,7 @@ export default function BomTable({ state }) {
     let txt = '铝型材抽屉设计 - 物料清单 (BOM)\n' + '='.repeat(64) + '\n'
     txt += `柜体: W${cabinetW} × D${cabinetD} × H${cabinetH} mm\n`
     txt += `型材: ${profileW}×${profileH}mm    抽屉数: ${drawerCount}\n`
-    if (scopeFilter !== 'all') {
-      const label = scopeFilter === 'cabinet' ? '柜体' : `抽屉 ${parseInt(scopeFilter.split('-')[1]) + 1}`
-      txt += `范围: ${label}\n`
-    }
+    if (selectedScopes.size > 0) txt += `范围: ${exportSuffix}\n`
     txt += '='.repeat(64) + '\n\n'
     const typeNames = { profile: '型材', panel: '板材', rail: '滑轨', connector: '连接件', screw: '螺钉' }
     BOM_TYPE_ORDER.forEach(type => {
@@ -61,8 +75,7 @@ export default function BomTable({ state }) {
       })
       txt += '\n'
     })
-    const suffix = scopeFilter === 'all' ? '全部' : scopeFilter === 'cabinet' ? '柜体' : `抽屉${parseInt(scopeFilter.split('-')[1]) + 1}`
-    download(txt, `铝型材抽屉BOM_${suffix}.txt`, 'text/plain;charset=utf-8')
+    download(txt, `铝型材抽屉BOM_${exportSuffix}.txt`, 'text/plain;charset=utf-8')
   }
 
   function download(content, name, mime) {
@@ -80,9 +93,9 @@ export default function BomTable({ state }) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 shrink-0">
         <h2 className="text-sm font-semibold text-slate-800">物料清单 (BOM)</h2>
         <div className="flex gap-2">
-          <button onClick={exportCSV}
+          <button onClick={exportXlsx}
             className="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors">
-            导出 CSV
+            导出 XLSX
           </button>
           <button onClick={exportText}
             className="px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-white rounded transition-colors">
@@ -91,14 +104,26 @@ export default function BomTable({ state }) {
         </div>
       </div>
 
-      {/* Scope filter tabs */}
-      <div className="flex gap-1 px-4 pt-2 pb-1 border-b border-slate-100 shrink-0 overflow-x-auto">
+      {/* Scope filter — multi-select chips */}
+      <div className="flex items-center gap-1 px-4 pt-2 pb-1 border-b border-slate-100 shrink-0 overflow-x-auto">
+        {/* 全部 = clear selection */}
+        <button
+          onClick={() => toggleScope('all')}
+          className={`px-2.5 py-1 text-xs rounded whitespace-nowrap transition-colors ${
+            selectedScopes.size === 0
+              ? 'bg-blue-600 text-white font-medium'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          全部
+        </button>
+        <span className="text-slate-200 select-none">|</span>
         {scopeTabs.map(tab => (
           <button
             key={tab.key}
-            onClick={() => setScopeFilter(tab.key)}
+            onClick={() => toggleScope(tab.key)}
             className={`px-2.5 py-1 text-xs rounded whitespace-nowrap transition-colors ${
-              scopeFilter === tab.key
+              selectedScopes.has(tab.key)
                 ? 'bg-blue-600 text-white font-medium'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}

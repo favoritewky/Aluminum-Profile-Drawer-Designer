@@ -99,6 +99,11 @@ function parseItems(raw) {
       const dims = dm ? [Math.round(+dm[1]) - 10, Math.round(+dm[2]) - 10] : null
       panels.push({ num, material: '聚碳酸酯', spec: '4mm', dims, qty, drawRef, note: '每边已减10mm' })
 
+    } else if (code === '2.83.0236.02-99') {
+      const dm   = desc.match(/大小：([\d.]+)MM\s*x\s*([\d.]+)MM/i)
+      const dims = dm ? [Math.round(+dm[1]) + 18, Math.round(+dm[2])] : null
+      panels.push({ num, material: 'PVC发泡板', spec: '6mm', dims, qty, drawRef, note: '宽边已加18mm，非库存件按需采购' })
+
     } else if (code === '0.63.D07991.04008') {
       hardware.push({ num, name: '沉头螺钉 M4×8', qty })
     } else if (code === '0.63.D07991.06012') {
@@ -133,15 +138,20 @@ function parseItems(raw) {
   markWarnings(ppProfiles)
 
   // ── Summary: only 铝型材 + 面板 ──────────────────────────────────────────
+  const panelArea = (mat) =>
+    panels.filter(p => p.material === mat).reduce((s, p) => s + (p.dims ? p.dims[0] * p.dims[1] * p.qty : 0), 0)
+  const panelCount = (mat) =>
+    panels.filter(p => p.material === mat).reduce((s, p) => s + p.qty, 0)
+
   const summary = {
-    profileCount:   profiles.reduce((s, p) => s + p.qty, 0),
-    profileTotalMm: profiles.reduce((s, p) => s + p.length * p.qty, 0),
-    acrylicCount:   panels.filter(p => p.material === '亚克力').reduce((s, p) => s + p.qty, 0),
-    acrylicAreaMm2: panels.filter(p => p.material === '亚克力')
-      .reduce((s, p) => s + (p.dims ? p.dims[0] * p.dims[1] * p.qty : 0), 0),
-    polycarbCount:  panels.filter(p => p.material === '聚碳酸酯').reduce((s, p) => s + p.qty, 0),
-    polycarbAreaMm2: panels.filter(p => p.material === '聚碳酸酯')
-      .reduce((s, p) => s + (p.dims ? p.dims[0] * p.dims[1] * p.qty : 0), 0),
+    profileCount:    profiles.reduce((s, p) => s + p.qty, 0),
+    profileTotalMm:  profiles.reduce((s, p) => s + p.length * p.qty, 0),
+    acrylicCount:    panelCount('亚克力'),
+    acrylicAreaMm2:  panelArea('亚克力'),
+    polycarbCount:   panelCount('聚碳酸酯'),
+    polycarbAreaMm2: panelArea('聚碳酸酯'),
+    pvcCount:        panelCount('PVC发泡板'),
+    pvcAreaMm2:      panelArea('PVC发泡板'),
   }
 
   return { profiles, ppProfiles, panels, hardware, others, summary }
@@ -210,25 +220,29 @@ function formatText({ profiles, ppProfiles, panels, hardware, others, summary })
     out.push('（未识别到任何条目，请检查粘贴的内容格式）')
 
   // ── Summary ────────────────────────────────────────────────────────────────
-  const { profileCount, profileTotalMm, acrylicCount, acrylicAreaMm2, polycarbCount, polycarbAreaMm2 } = summary
+  const { profileCount, profileTotalMm,
+          acrylicCount, acrylicAreaMm2,
+          polycarbCount, polycarbAreaMm2,
+          pvcCount, pvcAreaMm2 } = summary
+  const totalPanelCount = acrylicCount + polycarbCount + pvcCount
+  const totalPanelArea  = acrylicAreaMm2 + polycarbAreaMm2 + pvcAreaMm2
+  const panelTypeCount  = [acrylicAreaMm2, polycarbAreaMm2, pvcAreaMm2].filter(v => v > 0).length
   const hasProfileSummary = profileTotalMm > 0
-  const hasPanelSummary   = acrylicAreaMm2 > 0 || polycarbAreaMm2 > 0
+  const hasPanelSummary   = totalPanelArea > 0
   if (hasProfileSummary || hasPanelSummary) {
     out.push('─'.repeat(48))
     out.push('【汇总统计】')
     out.push('')
-    if (hasProfileSummary) {
+    if (hasProfileSummary)
       out.push(`  铝型材 30×30mm：共 ${profileCount} 根，总长 ${fmtLen(profileTotalMm)}`)
-    }
-    if (acrylicAreaMm2 > 0) {
+    if (acrylicAreaMm2 > 0)
       out.push(`  面板·亚克力：  共 ${acrylicCount} 块，总面积 ${fmtArea(acrylicAreaMm2)}`)
-    }
-    if (polycarbAreaMm2 > 0) {
+    if (polycarbAreaMm2 > 0)
       out.push(`  面板·聚碳酸酯：共 ${polycarbCount} 块，总面积 ${fmtArea(polycarbAreaMm2)}`)
-    }
-    if (acrylicAreaMm2 > 0 && polycarbAreaMm2 > 0) {
-      out.push(`  面板合计：      共 ${acrylicCount + polycarbCount} 块，总面积 ${fmtArea(acrylicAreaMm2 + polycarbAreaMm2)}`)
-    }
+    if (pvcAreaMm2 > 0)
+      out.push(`  面板·PVC发泡板：共 ${pvcCount} 块，总面积 ${fmtArea(pvcAreaMm2)}`)
+    if (panelTypeCount > 1)
+      out.push(`  面板合计：      共 ${totalPanelCount} 块，总面积 ${fmtArea(totalPanelArea)}`)
     out.push('')
   }
 
@@ -510,7 +524,11 @@ export default function BomParser() {
                   </div>
 
                   {/* Summary strip */}
-                  {summary && (summary.profileTotalMm > 0 || summary.acrylicAreaMm2 > 0 || summary.polycarbAreaMm2 > 0) && (
+                  {summary && (summary.profileTotalMm > 0 || summary.acrylicAreaMm2 > 0 || summary.polycarbAreaMm2 > 0 || summary.pvcAreaMm2 > 0) && (() => {
+                    const totalPanel = summary.acrylicAreaMm2 + summary.polycarbAreaMm2 + summary.pvcAreaMm2
+                    const totalCount = summary.acrylicCount + summary.polycarbCount + summary.pvcCount
+                    const typeCount  = [summary.acrylicAreaMm2, summary.polycarbAreaMm2, summary.pvcAreaMm2].filter(v => v > 0).length
+                    return (
                     <div className="shrink-0 flex flex-wrap items-center gap-x-5 gap-y-1
                       px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-slate-700">
                       {summary.profileTotalMm > 0 && (
@@ -531,12 +549,20 @@ export default function BomParser() {
                           总面积&nbsp;<strong className="text-blue-700">{fmtArea(summary.polycarbAreaMm2)}</strong>
                         </span>
                       )}
-                      {summary.acrylicAreaMm2 > 0 && summary.polycarbAreaMm2 > 0 && (
+                      {summary.pvcAreaMm2 > 0 && (
+                        <span>
+                          PVC发泡板共&nbsp;<strong className="text-blue-700">{summary.pvcCount}</strong>&nbsp;块&nbsp;·&nbsp;
+                          总面积&nbsp;<strong className="text-blue-700">{fmtArea(summary.pvcAreaMm2)}</strong>
+                        </span>
+                      )}
+                      {typeCount > 1 && (
                         <span className="text-slate-500">
-                          面板合计&nbsp;<strong className="text-slate-700">{fmtArea(summary.acrylicAreaMm2 + summary.polycarbAreaMm2)}</strong>
+                          面板合计&nbsp;<strong className="text-slate-700">{totalCount}块 / {fmtArea(totalPanel)}</strong>
                         </span>
                       )}
                     </div>
+                    )
+                  })()}
                   )}
 
                 </div>
