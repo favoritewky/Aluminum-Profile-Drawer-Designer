@@ -1,6 +1,19 @@
 import { useState } from 'react'
 import * as XLSX from 'xlsx'
 
+// ─── BOM 整理特殊规则 ──────────────────────────────────────────────────────────
+const PARSER_RULES = [
+  { label: '铝型材识别',     desc: '编码前两段 1.11（如 1.11.030030/600）；长度取编码末尾斜杠后的数字（/600 → 600mm）。' },
+  { label: 'PP 组合型材',    desc: '编码前两段 1.41（如 1.41.F14/…）；长度取法同铝型材。' },
+  { label: '亚克力 = 柜门',  desc: '编码前两段 2.86；尺寸原样提取；描述含"Special Order"时标注特殊订货需单独报价。' },
+  { label: '聚碳酸酯 = 内嵌插板', desc: '编码前两段 2.87；设计图中为插板，实际做内嵌安装；尺寸宽高各减 10mm（内嵌余量）。' },
+  { label: 'PVC 发泡板 = 侧板', desc: '编码前两段 2.83；侧板需与前柜门（亚克力）齐平，宽边 +18mm 补偿厚度差；非库存件，按需采购。' },
+  { label: '加工差异警告',   desc: '相同编码的型材若加工要求（类型、孔径、距离）不一致，所有相关行标 ⚠，提示区分订购和安装。' },
+  { label: 'PDF 页眉过滤',   desc: '以"页码："开头的行（PDF 分页页眉）及其后的延续行自动忽略，不参与解析。' },
+  { label: '多行条目合并',   desc: '同一条目内容跨行时，后续行自动追加到主行末尾，直至下一个编号行或子项行为止。' },
+]
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ─── parseMachining ───────────────────────────────────────────────────────────
 function parseMachining(letter, rest) {
   const body = rest
@@ -77,42 +90,46 @@ function parseItems(raw) {
 
   const profiles = [], ppProfiles = [], panels = [], hardware = [], others = []
 
+  // Returns the leading "x.xx" prefix of a code (first two dot-separated segments)
+  const pfx = c => { const m = c.match(/^(\d+\.\d+)/); return m ? m[1] : '' }
+
   for (const it of items) {
     const { num, code, desc, qty, drawRef, subs } = it
+    const p = pfx(code)
 
-    if (code.startsWith('1.11.030030')) {
+    if (p === '1.11') {
       const len = (code.match(/\/(\d+)$/) || [])[1]
       profiles.push({ num, code, length: len ? +len : 0, qty, drawRef, subs, warned: false })
 
-    } else if (code.startsWith('1.41.F14')) {
+    } else if (p === '1.41') {
       const len = (code.match(/\/(\d+)$/) || [])[1]
       ppProfiles.push({ num, code, length: len ? +len : 0, qty, drawRef, subs, warned: false })
 
-    } else if (code === '2.86.2362-99') {
+    } else if (p === '2.86') {
       const dm   = desc.match(/大小：([\d.]+)MM\s*x\s*([\d.]+)MM/i)
       const dims = dm ? [Math.round(+dm[1]), Math.round(+dm[2])] : null
-      const note = /Special Order/i.test(desc) ? '特殊订货，需单独报价' : ''
+      const note = '柜门' + (/Special Order/i.test(desc) ? '；特殊订货，需单独报价' : '')
       panels.push({ num, material: '亚克力', spec: '6mm', dims, qty, drawRef, note })
 
-    } else if (code === '2.87.1571-99') {
+    } else if (p === '2.87') {
       const dm   = desc.match(/大小：([\d.]+)MM\s*x\s*([\d.]+)MM/i)
       const dims = dm ? [Math.round(+dm[1]) - 10, Math.round(+dm[2]) - 10] : null
-      panels.push({ num, material: '聚碳酸酯', spec: '4mm', dims, qty, drawRef, note: '每边已减10mm' })
+      panels.push({ num, material: '聚碳酸酯', spec: '4mm', dims, qty, drawRef, note: '设计为插板，实际做内嵌；每边已减10mm' })
 
-    } else if (code === '2.83.0236.02-99') {
+    } else if (p === '2.83') {
       const dm   = desc.match(/大小：([\d.]+)MM\s*x\s*([\d.]+)MM/i)
       const dims = dm ? [Math.round(+dm[1]) + 18, Math.round(+dm[2])] : null
-      panels.push({ num, material: 'PVC发泡板', spec: '6mm', dims, qty, drawRef, note: '宽边已加18mm，非库存件按需采购' })
+      panels.push({ num, material: 'PVC发泡板', spec: '6mm', dims, qty, drawRef, note: '侧板；宽边+18mm与前柜门对齐；非库存件按需采购' })
 
-    } else if (code === '0.63.D07991.04008') {
+    } else if (code.startsWith('0.63.D07991.04')) {
       hardware.push({ num, name: '沉头螺钉 M4×8', qty })
-    } else if (code === '0.63.D07991.06012') {
+    } else if (code.startsWith('0.63.D07991.06')) {
       hardware.push({ num, name: '沉头螺钉 M6×12', qty })
-    } else if (code === '1.21.3F1') {
+    } else if (p === '1.21') {
       hardware.push({ num, name: '标准连接件', qty })
-    } else if (code === '1.31.FM4') {
+    } else if (code.startsWith('1.31.FM4')) {
       hardware.push({ num, name: '螺母板 M4', qty })
-    } else if (code === '1.31.FM6') {
+    } else if (code.startsWith('1.31.FM6')) {
       hardware.push({ num, name: '螺母板 M6', qty })
     } else {
       others.push({ num, code, desc, qty, drawRef })
@@ -358,9 +375,10 @@ function parse(raw) {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function BomParser() {
-  const [open, setOpen]     = useState(false)
-  const [input, setInput]   = useState('')
-  const [result, setResult] = useState({ text: '', rows: [], summary: null })
+  const [open, setOpen]         = useState(false)
+  const [input, setInput]       = useState('')
+  const [result, setResult]     = useState({ text: '', rows: [], summary: null })
+  const [showRules, setShowRules] = useState(false)
 
   const handleParse = () => setResult(parse(input))
   const handleClear = () => { setInput(''); setResult({ text: '', rows: [], summary: null }) }
@@ -386,14 +404,37 @@ export default function BomParser() {
             style={{ width: '90vw', maxWidth: 1100, height: '88vh' }}>
 
             {/* Header */}
-            <div className="shrink-0 flex items-center justify-between px-5 py-3
-              border-b border-slate-200 bg-slate-50 rounded-t-xl">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-slate-800">MayCAD BOM 整理</span>
-                <span className="text-xs text-slate-400">粘贴原始 BOM → 翻译整理 → 文本 + 表格同时展示</span>
+            <div className="shrink-0 border-b border-slate-200 bg-slate-50 rounded-t-xl">
+              <div className="flex items-center justify-between px-5 py-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="font-semibold text-slate-800">MayCAD BOM 整理</span>
+                  <span className="text-xs text-slate-400">粘贴原始 BOM → 翻译整理 → 文本 + 表格同时展示</span>
+                  <button
+                    onClick={() => setShowRules(v => !v)}
+                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                      showRules
+                        ? 'bg-amber-100 border-amber-300 text-amber-700 font-medium'
+                        : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-600'
+                    }`}
+                  >
+                    整理规则
+                  </button>
+                </div>
+                <button onClick={() => setOpen(false)}
+                  className="text-slate-400 hover:text-slate-700 text-xl leading-none px-1">✕</button>
               </div>
-              <button onClick={() => setOpen(false)}
-                className="text-slate-400 hover:text-slate-700 text-xl leading-none px-1">✕</button>
+              {showRules && (
+                <div className="px-5 pb-3">
+                  <ul className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                    {PARSER_RULES.map(r => (
+                      <li key={r.label} className="flex gap-1.5 text-[11px] leading-relaxed">
+                        <span className="shrink-0 font-semibold text-amber-700 whitespace-nowrap">· {r.label}：</span>
+                        <span className="text-slate-600">{r.desc}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             {/* Body */}

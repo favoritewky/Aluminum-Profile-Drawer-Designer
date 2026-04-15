@@ -2,9 +2,20 @@ import { useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { generateBOM, BOM_TYPE_META, BOM_TYPE_ORDER } from '../utils/bom.js'
 
+const BOM_RULES = [
+  { label: '合并规则', desc: '名称 + 规格 + 范围三者完全相同的条目自动累加数量；跨范围（柜体 vs 各抽屉）的同名条目保持独立。' },
+  { label: '连接件影响截料', desc: '三通角码：前/后横梁与侧向横梁均缩短 2×型材宽（两端各让位）。L角码 / 槽用角码 / T螺母：前/后横梁取全净内宽，侧向横梁缩短 2×型材宽（夹在前后梁之间）。' },
+  { label: '螺钉计算', desc: '每个角码需 3 颗螺钉；每个抽屉底部 4 角 = 12 颗。' },
+  { label: '侧装滑轨安装横梁', desc: '每个铝制抽屉在柜体侧面各加一根横梁，条目按抽屉编号独立命名（不合并），备注记录中心距柜顶距离供现场定位。' },
+  { label: '底板 / 后板 / 侧板', desc: '均向内缩进型材宽（嵌入型材内侧槽），尺寸 = 净内宽/深 − 2×型材宽。' },
+  { label: '面板扩展', desc: 'none = 不扩展；half = 延伸半个型材宽；full = 延伸整个型材宽。四向独立设置。' },
+  { label: '木质抽屉箱体', desc: '侧板取全净内深；前/后板宽 = 净内宽 − 2×侧板厚；底板同理缩进侧板厚，与铝框结构不同。' },
+]
+
 export default function BomTable({ state }) {
   const bom = useMemo(() => generateBOM(state), [state])
   const [selectedScopes, setSelectedScopes] = useState(new Set())
+  const [showRules, setShowRules] = useState(false)
 
   // Build scope chip list: cabinet | drawer-0 … drawer-N  (no 'all' — empty set = all)
   const scopeTabs = useMemo(() => {
@@ -91,7 +102,20 @@ export default function BomTable({ state }) {
     <div className="bg-white border-t border-slate-200 flex flex-col shrink-0" style={{ maxHeight: '300px' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 shrink-0">
-        <h2 className="text-sm font-semibold text-slate-800">物料清单 (BOM)</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-slate-800">物料清单 (BOM)</h2>
+          <button
+            onClick={() => setShowRules(v => !v)}
+            title="整理规则说明"
+            className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+              showRules
+                ? 'bg-amber-100 border-amber-300 text-amber-700 font-medium'
+                : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-600'
+            }`}
+          >
+            整理规则
+          </button>
+        </div>
         <div className="flex gap-2">
           <button onClick={exportXlsx}
             className="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors">
@@ -103,6 +127,21 @@ export default function BomTable({ state }) {
           </button>
         </div>
       </div>
+
+      {/* Rules panel */}
+      {showRules && (
+        <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 shrink-0 overflow-y-auto" style={{ maxHeight: '180px' }}>
+          <p className="text-[11px] font-semibold text-amber-700 mb-2">BOM 整理特殊规则</p>
+          <ul className="space-y-1.5">
+            {BOM_RULES.map(r => (
+              <li key={r.label} className="flex gap-2 text-[11px] leading-relaxed">
+                <span className="shrink-0 font-semibold text-amber-700 whitespace-nowrap">· {r.label}：</span>
+                <span className="text-amber-900">{r.desc}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Scope filter — multi-select chips */}
       <div className="flex items-center gap-1 px-4 pt-2 pb-1 border-b border-slate-100 shrink-0 overflow-x-auto">
